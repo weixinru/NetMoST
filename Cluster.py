@@ -50,43 +50,16 @@ import warnings
 warnings.filterwarnings("ignore")
 
 
-
-def init_parameter():
-
-    '''''
-    -----------------------------parameters------------------------------
-    '''''
-    # setting the hyper parameters
-    import argparse
-    parser = argparse.ArgumentParser(description='Clustering',formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('--dataset', default='Community', choices=['SNP'])
-    parser.add_argument('--dataset_hospital', default=-1,choices=[-1,20])
-    # 0 HC   1 MDD     2 SZ     3 BD
-    parser.add_argument('--types', default=[0,1])  
-    parser.add_argument('--hc_type', default=0)
-    parser.add_argument('--classification_type', default='svm',choices=['Twoaccessmodel', 'resnet','CNN3DNet'])
-    
-    parser.add_argument('--cluster_type', default='Kmeans', choices=['GMM','Spe', 'Kmeans', 'Agg','HDBSCAN'])  #Cluster
-    parser.add_argument('--dr_type', default='UMAP-y', choices=['UMAP','PCA', 't-SNE', 'NMF'])   #dimension reduction
-    parser.add_argument('--dr_dim', default=3)
-    parser.add_argument('--save_path', default='./results')    
-    parser.add_argument('--seed',default=seed)
-    parser.add_argument('--threshold',default=0.7)
-    args = parser.parse_args() 
-    
-    file_name = Path(__file__).name[:-1]
-    args.save_path = args.save_path+'/'+file_name
-    
-    return args
             
-class CCD(BaseEstimator):
-    def __init__(self,dr_type='UMAP',dr_dim=2,cluster_type='GMM',k=2,overwrite=False,threshold=0.7):
+class SNP_Cluster(BaseEstimator):
+    def __init__(self,dr_type='PCA',dr_dim=12,cluster_type='MiniBatchKMeans',k=3,overwrite=False,threshold=0.7,save_path = './result/'):
         self.dr_type = dr_type
         self.dr_dim = dr_dim
         self.cluster_type = cluster_type
         self.k = k
         self.overwrite = overwrite
         self.threshold = threshold
+        self.save_path = save_path
     def cluster(self,type_,classes,x):
         if type_ == 'Spe':
             model = SpectralClustering(n_clusters=classes,random_state=0)
@@ -135,39 +108,12 @@ class CCD(BaseEstimator):
         CH_DB_SC_pd.loc[self.k] = {'CH':CH,'DB':DB,'SC':SC}
         
         CH_DB_SC_pd.to_excel(self.save_path+'/%d/CH_DB_SC.xlsx'%self.k)
-         
-    def init_parameters(self):
-        args = init_parameter()
-        self.classification_type = args.classification_type
-        self.save_path = args.save_path + '/%s_%s_%d_%s_%s_%f'%(args.dataset,self.dr_type,self.dr_dim,self.cluster_type,
-                                                                     args.classification_type,self.threshold)
-        
-        self.dataset = args.dataset
-        self.hc_type = args.hc_type
-        self.types = args.types    
-        Tools.check_and_create_directory(self.save_path)
-        
-        args.cluster_type = self.cluster_type
-        args.dr_type = self.dr_type
-        args.dr_dim = self.dr_dim
-        args.threshold = self.threshold
-        args.save_path = self.save_path
-
-        
-        f1 = open(os.path.join(self.save_path,'parameter.txt'),'w')
-        f1.write(str(vars(args)))
-        f1.close()
-        print(args)
-        return args
             
     def fit(self,x):
-        self.failed = False
-        self.init_parameters()
-        
+        self.failed = False        
         if Tools.check_has_it_alread_ran(self.save_path,self.k) and self.overwrite == False:
             print('skip this run !!!')
             return
-        # index_hc = y==self.hc_type
         x_p = x
         x_p_dr = self.dimention_reduction(self.dr_type, self.dr_dim, x_p)
         self.y_cluster = self.cluster(self.cluster_type,self.k,x_p_dr)
@@ -176,8 +122,6 @@ class CCD(BaseEstimator):
         for key,value in y_cluster_dict.items():
             if value < 30 or len(y_cluster_dict.items()) != self.k:
                 self.failed=True
-                print('less than 30 abandon!!')
-                # shutil.rmtree(self.save_path)
                 return
             
         save_path_clustering = self.save_path+'/%d/results'%self.k
@@ -193,9 +137,6 @@ class CCD(BaseEstimator):
             x_p_dr = self.dimention_reduction('PCA',2,x_p_dr)
         Tools.plot_data(x_p_dr,self.y_cluster,save_path_clustering)
 
-
-
-  
     def score(self,x=None,y=None):
         if self.failed:
             return 0
@@ -241,38 +182,13 @@ class CCD(BaseEstimator):
         with open('./results/score_sum_svm_OR_addThresh.txt','a+') as openfile:
             openfile.writelines(subfile_name+'\t'+str(max_subtype_or)+'\n')
         return max_subtype_or     
-    
 
-def search_all_parameters(save_path):
-    opt = BayesSearchCV(
-        CCD(),
-        {
-            'dr_type':['PCA','Isomap','UMAP','UMAP-Y','RandomProj','SVD','FastICA'],
-            'dr_dim':(2,30),
-            'cluster_type':['Spe','Kmeans','Agg','GMM','MiniBatchKMeans'],
-            'k':(2,3),
-            'threshold':[0.7]
-        },
-        n_iter = 300,
-        cv=[(slice(None), slice(None))],
-        verbose=1,
-        random_state=1
-    )
-    
-    opt.fit(x)
-    
-    np.save(save_path,opt.cv_results_)
-    print("val. score: %s" % opt.best_score_)
-    print("test score: %s" % opt.score(x))
     
 if __name__ == "__main__":
-    data1 = np.load('genetype_sz_QC_case_0.68.npy')
-    x = data1.reshape((data1.shape[0],-1))
-    
-    save_path = './result1111/'
-    search_all_parameters(save_path)
-    
-    model = CCD(dr_type='PCA',dr_dim=12,cluster_type='MiniBatchKMeans',k=3,overwrite=True)
+    data = np.load('genetype_sz_QC_case_0.68.npy')
+    x = data.reshape((data1.shape[0],-1))
+    save_path = './result/' 
+    model = SNP_Cluster(dr_type='PCA',dr_dim=12,cluster_type='MiniBatchKMeans',k=3,overwrite=True, threshold=0.7,save_path = './result/')
     model.fit(x)
     score = model.score()
     print(score)
